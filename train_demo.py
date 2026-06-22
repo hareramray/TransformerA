@@ -12,10 +12,23 @@ well under a minute on CPU and the loss should fall close to zero.
 Run:  python train_demo.py
 """
 
+import os
+
 import torch
 import torch.nn as nn
 
 from model import Transformer, make_pad_mask, make_tgt_mask
+
+# Where to save the trained weights. A ".pt" file is just a Python pickle
+# written by torch.save -- here it holds the model weights plus the config
+# needed to rebuild the exact same architecture before loading them.
+CKPT_PATH = os.path.join(os.path.dirname(__file__), "transformer.pt")
+
+# Architecture config kept in one place so training and inference agree.
+MODEL_CONFIG = dict(
+    src_vocab_size=20, tgt_vocab_size=20,
+    d_model=64, num_heads=4, num_layers=2, d_ff=128, dropout=0.1,
+)
 
 # Special token ids. 0 is reserved for PAD, 1 for the decoder start token (BOS).
 PAD, BOS = 0, 1
@@ -61,10 +74,7 @@ def main():
     torch.manual_seed(0)
 
     # A small model is plenty for this toy task.
-    model = Transformer(
-        src_vocab_size=VOCAB, tgt_vocab_size=VOCAB,
-        d_model=64, num_heads=4, num_layers=2, d_ff=128, dropout=0.1,
-    ).to(device)
+    model = Transformer(**MODEL_CONFIG).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=PAD)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -87,6 +97,22 @@ def main():
 
         if step % 50 == 0:
             print(f"step {step:4d} | loss {loss.item():.4f}")
+
+    # ---- Save the trained model to a .pt checkpoint ----
+    # We store the weights (state_dict) *and* the config + task constants so
+    # inference.py can rebuild an identical model and load the weights into it.
+    # Saving state_dict (not the whole model object) is the recommended, more
+    # portable approach -- it doesn't pickle the class/source paths.
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "config": MODEL_CONFIG,
+            "task": {"PAD": PAD, "BOS": BOS, "VOCAB": VOCAB, "SEQ_LEN": SEQ_LEN},
+            "final_loss": loss.item(),
+        },
+        CKPT_PATH,
+    )
+    print(f"\nSaved checkpoint -> {CKPT_PATH}")
 
     # Show it actually works on fresh examples.
     print("\n--- greedy decoding on new sequences ---")
